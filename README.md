@@ -1,7 +1,49 @@
+<div align="center">
+
 # ZeroPort
 
-**What is using port 8000?** ZeroPort answers that in the time it takes to
-double-click a shortcut, and lets you release the port safely.
+### What is using port 8000?
+
+ZeroPort answers that in the time it takes to double-click a shortcut —
+and lets you release the port safely.
+
+<br>
+
+[![Download ZeroPort.exe](https://img.shields.io/badge/Download-ZeroPort.exe-C6F24E?style=for-the-badge&logo=windows&logoColor=0A0A0B&labelColor=0A0A0B)](https://github.com/its-tahir/zero-port/releases/latest/download/ZeroPort.exe)
+
+**No installer · No Python · No admin rights · 100% offline**
+
+<br>
+
+[![release](https://img.shields.io/github/v/release/its-tahir/zero-port?style=flat-square&color=C6F24E&labelColor=0A0A0B&label=release)](https://github.com/its-tahir/zero-port/releases/latest)
+[![downloads](https://img.shields.io/github/downloads/its-tahir/zero-port/total?style=flat-square&color=C6F24E&labelColor=0A0A0B&label=downloads)](https://github.com/its-tahir/zero-port/releases)
+[![tests](https://img.shields.io/github/actions/workflow/status/its-tahir/zero-port/tests.yml?style=flat-square&label=tests&labelColor=0A0A0B&color=C6F24E)](https://github.com/its-tahir/zero-port/actions/workflows/tests.yml)
+![platform](https://img.shields.io/badge/Windows-10%20%7C%2011-3A3A3E?style=flat-square&labelColor=0A0A0B)
+![python](https://img.shields.io/badge/Python-3.11%2B-3A3A3E?style=flat-square&labelColor=0A0A0B)
+
+<br>
+
+![ZeroPort](docs/screenshot.png)
+
+</div>
+
+---
+
+## The problem
+
+You start a service and get this:
+
+```text
+OSError: [Errno 10048] error while attempting to bind on address
+('127.0.0.1', 8000): only one usage of each socket address is
+normally permitted
+```
+
+So you open a terminal, run `netstat -ano | findstr :8000`, copy the PID,
+run `tasklist /fi "pid eq 12452"`, and end up looking at `python.exe` —
+which tells you nothing, because you have four of those running.
+
+ZeroPort is that whole loop, as one window.
 
 It is a single-window Windows desktop utility that lists every listening TCP
 port on your machine, names the process behind it, works out what that process
@@ -12,20 +54,25 @@ network analyser, and it will not grow into one.
 
 ---
 
-## Download
+## Install
 
-Grab **ZeroPort.exe** from the [latest release](https://github.com/its-tahir/zero-port/releases/latest)
-and run it. No installer, no Python, no administrator rights.
+**[⬇ Download ZeroPort.exe](https://github.com/its-tahir/zero-port/releases/latest/download/ZeroPort.exe)** — one file, 34 MB, nothing to install.
 
-Windows SmartScreen shows a warning the first time, because the binary is not
-code-signed — choose **More info → Run anyway**. If you would rather check
-first, every release lists the executable's SHA-256:
+1. Download it.
+2. Double-click it. Right-click → *Send to → Desktop* if you want a shortcut.
+
+Windows SmartScreen shows a warning the first time ("Windows protected your
+PC"), because the binary is not code-signed. Choose **More info → Run anyway**.
+
+If you would rather verify before running, every release publishes the
+executable's SHA-256:
 
 ```powershell
 Get-FileHash ZeroPort.exe -Algorithm SHA256
 ```
 
-Prefer to build it yourself? See [Building ZeroPort.exe](#building-zeroportexe).
+Prefer to build it yourself from source? See
+[Building ZeroPort.exe](#building-zeroportexe).
 
 ---
 
