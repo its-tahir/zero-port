@@ -73,11 +73,17 @@ Requires Python 3.11 or newer on Windows 10/11.
 python -m pytest
 ```
 
-The suite covers the service layer against the real operating system rather
-than mocks: it binds actual sockets and checks they appear, spawns real child
-processes and stops them, and forces the awkward paths — a PID that exits
-first, a PID reused by another process, an access-denied terminate, a process
-that ignores `terminate()`.
+The suite runs against the real operating system rather than mocks: it binds
+actual sockets and checks they appear, spawns real child processes and stops
+them, and forces the awkward paths — a PID that exits first, a PID reused by
+another process, an access-denied terminate, a process that ignores
+`terminate()`, a config file with a typo in it.
+
+`tests/test_end_to_end.py` drives the whole product once: it starts a real
+listener, waits for the real window to show it, clicks the STOP cell through
+Qt's event system, accepts the confirmation dialog, and checks the port is
+released and the row disappears on its own. The UI tests run headless under
+Qt's offscreen platform, so no desktop session is needed.
 
 ---
 
@@ -133,8 +139,10 @@ Settings live in a single file:
 Edit it by hand, or use the **NAMES** button in the app. Custom descriptions
 override automatic inference and are shown in lime so you can tell them apart.
 
-A malformed config never blocks startup — invalid values fall back to the
-defaults and the rest of the file is still used.
+A malformed config never blocks startup. Individual invalid values fall back to
+the defaults and the rest of the file is still used. If the file cannot be
+parsed at all, it is kept as `config.invalid.json` rather than overwritten, so
+a stray comma never costs you your port names.
 
 ---
 
@@ -156,7 +164,7 @@ The app never elevates itself and never runs shell commands.
 
 | Key | Action |
 |---|---|
-| `F5` | Refresh |
+| `F5` / `Ctrl` + `R` | Refresh |
 | `Ctrl` + `F` | Focus search |
 | `Esc` | Clear search |
 | `Enter` / double-click | Process details |
