@@ -50,7 +50,12 @@ class ProcessInfo:
 
 @dataclass(frozen=True)
 class PortEntry:
-    """One listening TCP endpoint, resolved and ready to render."""
+    """One port held by one process, with every address it listens on.
+
+    A service that binds both the IPv4 and IPv6 wildcard is two sockets but one
+    answer to "what is using this port?", so those bindings are merged into a
+    single row. ``bindings`` keeps the raw truth for the details dialog.
+    """
 
     port: int
     protocol: str
@@ -60,6 +65,7 @@ class PortEntry:
     protected: bool = False
     protection_reason: str = ""
     sibling_ports: Tuple[int, ...] = field(default_factory=tuple)
+    bindings: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
 
     @property
     def pid(self) -> int:
@@ -91,6 +97,15 @@ class PortEntry:
         return tuple(sorted({self.port, *self.sibling_ports}))
 
     @property
+    def endpoint_labels(self) -> Tuple[str, ...]:
+        """Every socket behind this row, written the way netstat would."""
+        labels = []
+        for ip, protocol in self.bindings:
+            host = f"[{ip}]" if ":" in ip else ip
+            labels.append(f"{protocol}   {host}:{self.port}")
+        return tuple(labels)
+
+    @property
     def search_blob(self) -> str:
         """Everything the search box is allowed to match against."""
         parts = [
@@ -101,6 +116,7 @@ class PortEntry:
             self.process.name,
             self.description,
             self.status,
+            *(ip for ip, _protocol in self.bindings),
         ]
         return " ".join(p for p in parts if p).lower()
 

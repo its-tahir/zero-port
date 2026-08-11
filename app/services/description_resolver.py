@@ -193,6 +193,18 @@ NAME_RULES: Dict[str, str] = {
     "searchindexer.exe": "Windows Search",
     "sqlwriter.exe": "SQL Server VSS Writer",
     "msmpeng.exe": "Microsoft Defender",
+    # Vendor services that commonly hold a local port
+    "onedrive.exe": "OneDrive",
+    "onedrive.sync.service.exe": "OneDrive sync service",
+    "lms.exe": "Intel Management Engine (LMS)",
+    "jhi_service.exe": "Intel Dynamic Application Loader",
+    "nvcontainer.exe": "NVIDIA container service",
+    "msedge.exe": "Microsoft Edge",
+    "chrome.exe": "Google Chrome",
+    "firefox.exe": "Mozilla Firefox",
+    "postman.exe": "Postman",
+    "slack.exe": "Slack",
+    "ms-teams.exe": "Microsoft Teams",
     # Misc developer tooling
     "ngrok.exe": "ngrok tunnel",
     "cloudflared.exe": "Cloudflare tunnel",
@@ -245,6 +257,8 @@ PORT_HINTS: Dict[int, str] = {
     9200: "Elasticsearch",
     11434: "Ollama",
     15672: "RabbitMQ management",
+    16992: "Intel AMT",
+    16993: "Intel AMT (TLS)",
     27017: "MongoDB",
 }
 

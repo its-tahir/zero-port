@@ -230,6 +230,44 @@ def test_the_stop_button_stays_inside_its_cell(qapp):
     assert cell.contains(box)
 
 
+# --------------------------------------------------------------- stop button
+
+
+def _click_action_cell(window, row: int):
+    from PySide6.QtCore import Qt as _Qt
+    from PySide6.QtTest import QTest
+
+    window.show()
+    QApplication.processEvents()
+
+    index = window.table.proxy.index(row, COL_ACTION)
+    point = PortItemDelegate.button_rect(window.table.visualRect(index)).center()
+    QTest.mouseClick(window.table.viewport(), _Qt.MouseButton.LeftButton, pos=point)
+    QApplication.processEvents()
+
+
+def test_clicking_stop_raises_a_request_for_that_row(window):
+    """Regression: Qt delivers editorEvent on release, not press."""
+    window._on_scan_finished([entry(port=8000), entry(port=3000, pid=18320)])
+
+    seen = []
+    window.table.stop_requested.connect(seen.append)
+    _click_action_cell(window, 1)
+
+    assert seen, "clicking STOP produced no request"
+    assert seen[0].port == 3000
+
+
+def test_clicking_a_protected_row_produces_no_request(window):
+    window._on_scan_finished([entry(pid=4, name="System", protected=True)])
+
+    seen = []
+    window.table.stop_requested.connect(seen.append)
+    _click_action_cell(window, 0)
+
+    assert not seen
+
+
 def _all_text(widget) -> str:
     from PySide6.QtWidgets import QLabel
 

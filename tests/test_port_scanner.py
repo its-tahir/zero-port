@@ -70,6 +70,54 @@ def test_ipv6_listener_is_reported_as_tcp6(scanner):
         pytest.skip("IPv6 loopback unavailable on this machine")
     assert entries
     assert entries[0].protocol == "TCP6"
+    assert entries[0].address == "::1"
+
+
+def test_ipv4_and_ipv6_sockets_on_one_port_become_one_row(scanner, monkeypatch):
+    """Two wildcard sockets are one answer to "what is using this port?"."""
+
+    def conn(ip, port, pid):
+        class Addr:
+            pass
+
+        addr = Addr()
+        addr.ip, addr.port = ip, port
+
+        class Conn:
+            pass
+
+        c = Conn()
+        c.status, c.laddr, c.pid = psutil.CONN_LISTEN, addr, pid
+        return c
+
+    monkeypatch.setattr(
+        psutil,
+        "net_connections",
+        lambda **_k: [conn("0.0.0.0", 135, 1452), conn("::", 135, 1452)],
+    )
+
+    entries = scanner.scan()
+    assert len(entries) == 1
+
+    entry = entries[0]
+    assert entry.address == "ALL"
+    assert entry.protocol == "TCP · TCP6"
+    assert entry.bindings == (("0.0.0.0", "TCP"), ("::", "TCP6"))
+    assert entry.endpoint_labels == ("TCP   0.0.0.0:135", "TCP6   [::]:135")
+
+
+def test_different_processes_on_one_port_stay_separate(scanner, monkeypatch):
+    class Addr:
+        ip, port = "0.0.0.0", 8080
+
+    class Conn:
+        status, laddr = psutil.CONN_LISTEN, Addr()
+
+        def __init__(self, pid):
+            self.pid = pid
+
+    monkeypatch.setattr(psutil, "net_connections", lambda **_k: [Conn(10), Conn(20)])
+    assert len(scanner.scan()) == 2
 
 
 def test_one_process_owning_several_ports_is_represented_accurately(scanner):

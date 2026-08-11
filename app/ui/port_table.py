@@ -145,7 +145,7 @@ class PortTableModel(QAbstractTableModel):
         if column == COL_DESCRIPTION:
             return entry.process.cmdline or entry.description
         if column == COL_ADDRESS:
-            return f"{entry.protocol} · {entry.address}:{entry.port}"
+            return "\n".join(entry.endpoint_labels) or f"{entry.protocol} {entry.address}"
         if column == COL_ACTION and entry.protected:
             return entry.protection_reason or "Protected system process."
         if column == COL_STATUS and not entry.has_pid:
@@ -415,8 +415,10 @@ class PortItemDelegate(QStyledItemDelegate):
             self._pressed_row = index.row()
             return True
 
-        if self._pressed_row == index.row():
-            self._pressed_row = -1
+        # Qt only routes the release through edit() in most cases, so a
+        # missing press must not swallow the click.
+        pressed, self._pressed_row = self._pressed_row, -1
+        if pressed in (-1, index.row()):
             self.stop_requested.emit(index)
         return True
 

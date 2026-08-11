@@ -161,7 +161,11 @@ class ProcessDetailsDialog(BaseDialog):
 
         self.add_field("Description", entry.description)
         self.add_field("Port", f"{entry.port}  ·  {entry.protocol}", mono=True)
-        self.add_field("Address", entry.address, mono=True)
+        self.add_field(
+            "Listening on",
+            "\n".join(entry.endpoint_labels) or entry.address,
+            mono=True,
+        )
         self.add_field("PID", str(entry.pid) if entry.has_pid else "", mono=True)
         self.add_field("Status", entry.status)
 

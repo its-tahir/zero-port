@@ -7,7 +7,7 @@ verdict and its sibling ports.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import psutil
@@ -98,9 +98,17 @@ class PortScanner:
             if pid:
                 ports_by_pid[pid].add(port)
 
-        entries: List[PortEntry] = []
+        # One row per (port, owner). The IPv4 and IPv6 sockets of the same
+        # service are one answer, not two identical-looking rows.
+        grouped: "OrderedDict[Tuple[int, Optional[int]], List[Tuple[str, str]]]" = (
+            OrderedDict()
+        )
         for port, ip, pid, protocol in rows:
-            info = processes.get(pid) if pid else ProcessInfo.unknown(pid)
+            grouped.setdefault((port, pid), []).append((ip, protocol))
+
+        entries: List[PortEntry] = []
+        for (port, pid), bindings in grouped.items():
+            info = processes.get(pid) if pid else None
             if info is None:
                 info = ProcessInfo.unknown(pid)
 
@@ -110,15 +118,33 @@ class PortScanner:
             entries.append(
                 PortEntry(
                     port=port,
-                    protocol=protocol,
-                    address=format_address(ip),
+                    protocol=self._merge_protocols(bindings),
+                    address=self._merge_addresses(bindings),
                     process=info,
                     description=self.resolver.resolve(port, info),
                     protected=protected,
                     protection_reason=reason,
                     sibling_ports=siblings,
+                    bindings=tuple(bindings),
                 )
             )
 
-        entries.sort(key=lambda e: (e.port, e.protocol, e.address))
+        entries.sort(key=lambda e: (e.port, e.address, e.pid))
         return entries
+
+    @staticmethod
+    def _merge_protocols(bindings: List[Tuple[str, str]]) -> str:
+        protocols = sorted({protocol for _ip, protocol in bindings})
+        return " · ".join(protocols)
+
+    @staticmethod
+    def _merge_addresses(bindings: List[Tuple[str, str]]) -> str:
+        """A wildcard binding subsumes the rest — it already means everything."""
+        formatted: List[str] = []
+        for ip, _protocol in bindings:
+            label = format_address(ip)
+            if label == "ALL":
+                return "ALL"
+            if label not in formatted:
+                formatted.append(label)
+        return ", ".join(formatted)
