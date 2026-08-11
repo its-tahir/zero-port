@@ -6,19 +6,20 @@ to :class:`ScanWorker` on its own thread, so nothing here can block the UI.
 
 from __future__ import annotations
 
+import os
 from typing import List, Optional
 
 from PySide6.QtCore import QThread, QTimer, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QBrush,
+    QFont,
     QGuiApplication,
     QKeySequence,
     QPainter,
     QShortcut,
 )
 from PySide6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -47,9 +48,14 @@ from app.ui.dialogs import (
 )
 from app.ui.panels import StatePanel
 from app.ui.port_table import ENTRY_ROLE, PortTableView
+from app.ui.widgets import CaretComboBox
 
 INTERVALS = ((2, "AUTO · 2S"), (5, "AUTO · 5S"), (10, "AUTO · 10S"), (30, "AUTO · 30S"))
 STATUS_CLEAR_MS = 6000
+
+# Comfortably past a stop's graceful + forced timeouts, so a shutdown during a
+# termination waits it out instead of killing the thread.
+SHUTDOWN_WAIT_MS = 9000
 
 
 class TexturedWidget(QWidget):
@@ -77,6 +83,7 @@ class MainWindow(QMainWindow):
         self._dialog_depth = 0
         self._status_token = 0
         self._pending_stop: Optional[PortEntry] = None
+        self._error_message: Optional[str] = None
 
         self.setWindowTitle("ZeroPort")
         self.setMinimumSize(850, 500)
@@ -94,6 +101,8 @@ class MainWindow(QMainWindow):
         self._apply_interval(
             self.config.refresh_interval if self.config.auto_refresh else 0
         )
+        if self.config.load_error:
+            self.set_status(self.config.load_error)
         QTimer.singleShot(0, self.refresh)
 
     # --------------------------------------------------------------- assembly
@@ -194,9 +203,9 @@ class MainWindow(QMainWindow):
         self.search.textChanged.connect(self._on_search_changed)
         row.addWidget(self.search, 0, Qt.AlignmentFlag.AlignBottom)
 
-        self.interval_box = QComboBox()
+        self.interval_box = CaretComboBox()
         self.interval_box.setObjectName("intervalBox")
-        self.interval_box.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.interval_box.setToolTip("How often ZeroPort rescans on its own")
         for seconds, label in INTERVALS:
             self.interval_box.addItem(label, seconds)
         self.interval_box.addItem("AUTO · OFF", 0)
@@ -241,11 +250,14 @@ class MainWindow(QMainWindow):
         row.addWidget(self.status_label)
         row.addStretch(1)
 
-        version = micro(f"v{APP_VERSION}", styles.TEXT_GHOST)
-        row.addWidget(version)
-
-        site = micro(APP_SITE, styles.TEXT_GHOST)
-        row.addWidget(site)
+        # The footer mark keeps its real casing — it is a domain, not a label.
+        for text in (f"v{APP_VERSION}", APP_SITE):
+            mark = QLabel(text)
+            font = styles.mono(8)
+            font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.2)
+            mark.setFont(font)
+            mark.setStyleSheet(f"color: {styles.rgba(styles.TEXT_GHOST)};")
+            row.addWidget(mark)
         return row
 
     def _build_worker(self) -> None:
@@ -268,6 +280,13 @@ class MainWindow(QMainWindow):
         self.auto_timer.setTimerType(Qt.TimerType.CoarseTimer)
         self.auto_timer.timeout.connect(self._on_auto_tick)
 
+        # A scan takes ~70 ms. Showing the bar immediately would flash a lime
+        # line across the window every few seconds for no reason, so it only
+        # appears if a scan is actually slow enough to be worth reporting.
+        self.scan_bar_timer = QTimer(self)
+        self.scan_bar_timer.setSingleShot(True)
+        self.scan_bar_timer.timeout.connect(lambda: self.scan_bar.setVisible(True))
+
     def _build_shortcuts(self) -> None:
         QShortcut(QKeySequence("F5"), self, activated=self.refresh)
         QShortcut(QKeySequence("Ctrl+R"), self, activated=self.refresh)
@@ -282,9 +301,18 @@ class MainWindow(QMainWindow):
             self._rescan_queued = True
             return
         self._scan_in_flight = True
-        self.scan_bar.setVisible(True)
+        self._show_progress(True)
         self.refresh_button.setEnabled(False)
         self.request_scan.emit()
+
+    def _show_progress(self, busy: bool) -> None:
+        """Reveal the scan bar only if the work outlasts a glance."""
+        if busy:
+            if not self.scan_bar.isVisible():
+                self.scan_bar_timer.start(250)
+        else:
+            self.scan_bar_timer.stop()
+            self.scan_bar.setVisible(False)
 
     def _on_auto_tick(self) -> None:
         # Never rescan under an open dialog — the row the user is reading
@@ -295,9 +323,10 @@ class MainWindow(QMainWindow):
     def _on_scan_finished(self, entries: List[PortEntry]) -> None:
         self._scan_in_flight = False
         self._had_first_result = True
-        self.scan_bar.setVisible(False)
+        self._show_progress(False)
         self.refresh_button.setEnabled(True)
 
+        self._error_message = None
         self._entries = entries
         self.table.set_entries(entries)
         self._update_view_state()
@@ -309,14 +338,24 @@ class MainWindow(QMainWindow):
     def _on_scan_failed(self, message: str) -> None:
         self._scan_in_flight = False
         self._rescan_queued = False
-        self.scan_bar.setVisible(False)
+        self._show_progress(False)
         self.refresh_button.setEnabled(True)
 
-        self.count_label.setText("—")
-        self.state_panel.show_error(message)
-        self.stack.setCurrentWidget(self.state_panel)
+        # Drop the previous result: showing stale rows as if they were current
+        # is worse than showing nothing.
+        self._error_message = message
+        self._entries = []
+        self.table.set_entries([])
+        self._update_view_state()
 
     def _update_view_state(self) -> None:
+        if self._error_message:
+            self.count_label.setText("—")
+            self.count_caption.setText("Listening")
+            self.state_panel.show_error(self._error_message)
+            self.stack.setCurrentWidget(self.state_panel)
+            return
+
         total = len(self._entries)
         visible = self.table.visible_count()
         query = self.search.text().strip()
@@ -370,7 +409,8 @@ class MainWindow(QMainWindow):
             self.config.set_refresh(seconds > 0, seconds or None)
 
     def _on_state_action(self) -> None:
-        if self.search.text().strip() and self._entries:
+        """One button, three panels — dispatch on which panel is showing."""
+        if self.state_panel.state == StatePanel.NO_MATCHES:
             self.search.clear()
         else:
             self.refresh()
@@ -379,13 +419,17 @@ class MainWindow(QMainWindow):
 
     def confirm_stop(self, entry: PortEntry) -> None:
         if not entry.can_stop:
-            NoticeDialog(
-                self,
-                "Protected process",
-                entry.protection_reason
-                or "This process is protected by Windows and cannot be stopped here.",
-                kicker="Not allowed",
-            ).exec()
+            with self._modal():
+                NoticeDialog(
+                    self, *self._refusal(entry), kicker="Not allowed"
+                ).exec()
+            return
+
+        if self._pending_stop is not None:
+            self.set_status(
+                f"Still stopping {self._pending_stop.process.display_name} — "
+                "one at a time."
+            )
             return
 
         with self._modal():
@@ -396,13 +440,33 @@ class MainWindow(QMainWindow):
 
         self._pending_stop = entry
         self.set_status(f"Stopping {entry.process.display_name} (PID {entry.pid})…")
-        self.scan_bar.setVisible(True)
+        self._show_progress(True)
         self.request_stop.emit(entry)
+
+    @staticmethod
+    def _refusal(entry: PortEntry) -> tuple[str, str]:
+        """Say why a row cannot be stopped — not every reason is protection."""
+        if not entry.has_pid:
+            return (
+                "No process to stop",
+                "Windows did not report which process owns this socket, so "
+                "ZeroPort has nothing to act on.",
+            )
+        if not entry.process.exists:
+            return (
+                "Process already gone",
+                "This process has exited. Refresh to update the list.",
+            )
+        return (
+            "Protected process",
+            entry.protection_reason
+            or "This process is protected by Windows and cannot be stopped here.",
+        )
 
     def _on_stop_finished(self, entry: PortEntry, result: TerminationResult) -> None:
         self._pending_stop = None
         if not self._scan_in_flight:
-            self.scan_bar.setVisible(False)
+            self._show_progress(False)
 
         if result.outcome is TerminationOutcome.STOPPED:
             released = ", ".join(str(p) for p in entry.owned_ports)
@@ -456,30 +520,33 @@ class MainWindow(QMainWindow):
             f"QMenu::item:disabled {{ color: {styles.rgba(styles.TEXT_GHOST)}; }}"
         )
 
-        details = QAction("Process details", self)
+        # Actions belong to the menu, and the menu is disposed of after use —
+        # otherwise every right-click leaves one behind for the window's life.
+        details = QAction("Process details", menu)
         details.triggered.connect(lambda: self.show_details(entry))
         menu.addAction(details)
 
-        copy_port = QAction(f"Copy port {entry.port}", self)
+        copy_port = QAction(f"Copy port {entry.port}", menu)
         copy_port.triggered.connect(
             lambda: QGuiApplication.clipboard().setText(str(entry.port))
         )
         menu.addAction(copy_port)
 
         if entry.has_pid:
-            copy_pid = QAction(f"Copy PID {entry.pid}", self)
+            copy_pid = QAction(f"Copy PID {entry.pid}", menu)
             copy_pid.triggered.connect(
                 lambda: QGuiApplication.clipboard().setText(str(entry.pid))
             )
             menu.addAction(copy_pid)
 
         menu.addSeparator()
-        stop = QAction("Stop process", self)
+        stop = QAction("Stop process", menu)
         stop.setEnabled(entry.can_stop)
         stop.triggered.connect(lambda: self.confirm_stop(entry))
         menu.addAction(stop)
 
         menu.exec(self.table.viewport().mapToGlobal(position))
+        menu.deleteLater()
 
     # ----------------------------------------------------------------- status
 
@@ -518,8 +585,15 @@ class MainWindow(QMainWindow):
             geometry.width(), geometry.height(), self.isMaximized()
         )
 
+        # quit() cannot interrupt a slot that is already running, and a stop
+        # can legitimately block for graceful + forced timeouts. Wait past that
+        # worst case rather than calling QThread::terminate(), which on Windows
+        # kills the thread mid-bytecode while it holds the GIL and open process
+        # handles.
         self.thread.quit()
-        if not self.thread.wait(4000):
-            self.thread.terminate()
-            self.thread.wait(1000)
+        if not self.thread.wait(SHUTDOWN_WAIT_MS):
+            # Nothing safe is left to do, and destroying a running QThread is
+            # a hard abort. Leave immediately instead; there is no state to
+            # flush — the config was already saved above.
+            os._exit(0)
         super().closeEvent(event)

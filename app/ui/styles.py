@@ -278,32 +278,8 @@ def app_stylesheet() -> str:
 
     /* ----------------------------------------------------------- combobox */
 
-    QComboBox#intervalBox {{
-        background: transparent;
-        border: 1px solid {rgba(LINE)};
-        border-radius: 2px;
-        padding: 7px 10px;
-        color: {rgba(TEXT_MUTED)};
-        font-family: "{mono_family()}";
-        font-size: 11px;
-        letter-spacing: 1.1px;
-        min-width: 96px;
-    }}
-    QComboBox#intervalBox:hover {{
-        border-color: {rgba(LINE_STRONG)};
-        color: {rgba(TEXT)};
-    }}
-    QComboBox#intervalBox::drop-down {{
-        border: none;
-        width: 18px;
-    }}
-    QComboBox#intervalBox::down-arrow {{
-        image: none;
-        border-left: 3px solid transparent;
-        border-right: 3px solid transparent;
-        border-top: 4px solid {rgba(TEXT_FAINT)};
-        margin-right: 8px;
-    }}
+    /* The closed selector is painted by CaretComboBox; only the popup list
+       is styled here. */
     QComboBox QAbstractItemView {{
         background: {rgba(SURFACE_RAISED)};
         border: 1px solid {rgba(LINE_STRONG)};

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -45,7 +46,14 @@ def micro(text: str, color=None) -> QLabel:
 class BaseDialog(QDialog):
     """Shared shell: quiet kicker, headline, lime rule, body, action row."""
 
-    def __init__(self, parent, kicker: str, headline: str, width: int = 460) -> None:
+    def __init__(
+        self,
+        parent,
+        kicker: str,
+        headline: str,
+        width: int = 460,
+        scrollable: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"ZeroPort — {headline}")
         self.setModal(True)
@@ -72,7 +80,23 @@ class BaseDialog(QDialog):
 
         self.body = QVBoxLayout()
         self.body.setSpacing(0)
-        outer.addLayout(self.body)
+        if scrollable:
+            # A command line can be 2 KB long; the dialog must not grow past
+            # the screen because of it.
+            holder = QWidget()
+            holder.setLayout(self.body)
+            area = QScrollArea()
+            area.setWidget(holder)
+            area.setWidgetResizable(True)
+            area.setFrameShape(QFrame.Shape.NoFrame)
+            area.setMaximumHeight(500)
+            area.setHorizontalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            )
+            area.setStyleSheet("QScrollArea, QScrollArea > QWidget { background: transparent; }")
+            outer.addWidget(area)
+        else:
+            outer.addLayout(self.body)
 
         outer.addSpacing(20)
         self.actions = QHBoxLayout()
@@ -157,10 +181,16 @@ class ProcessDetailsDialog(BaseDialog):
     """Everything we know about one listener, for when the name means nothing."""
 
     def __init__(self, parent, entry: PortEntry) -> None:
-        super().__init__(parent, "Process details", entry.process.display_name, width=560)
+        super().__init__(
+            parent,
+            "Process details",
+            entry.process.display_name,
+            width=560,
+            scrollable=True,
+        )
 
         self.add_field("Description", entry.description)
-        self.add_field("Port", f"{entry.port}  ·  {entry.protocol}", mono=True)
+        self.add_field("Port", str(entry.port), mono=True)
         self.add_field(
             "Listening on",
             "\n".join(entry.endpoint_labels) or entry.address,

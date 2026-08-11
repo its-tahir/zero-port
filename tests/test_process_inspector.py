@@ -83,6 +83,27 @@ def test_verify_rejects_a_different_name_on_the_same_pid(inspector):
     assert not same
 
 
+def test_verify_refuses_when_there_is_nothing_to_verify_against(inspector):
+    """A PID with no name and no start time proves nothing about identity.
+
+    That is exactly what an unreadable process yields, and treating it as a
+    match would reduce the safety gate to "does this PID exist?".
+    """
+    blind = ProcessInfo(pid=os.getpid(), name="", create_time=None, accessible=False)
+    same, current = inspector.verify(blind)
+    assert not same
+    assert current is not None
+
+
+def test_an_uninspectable_process_is_not_offered_a_stop_action():
+    from app.utils.windows import is_protected_process
+
+    blind = ProcessInfo(pid=4242, name="", create_time=None, accessible=False)
+    protected, reason = is_protected_process(blind)
+    assert protected
+    assert "cannot be inspected" in reason
+
+
 def test_verify_reports_a_vanished_process(inspector):
     child = subprocess.Popen([sys.executable, "-c", "pass"])
     child.wait()

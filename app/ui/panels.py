@@ -16,8 +16,11 @@ class StatePanel(QWidget):
 
     action_triggered = Signal()
 
+    BODY_WIDTH = 420
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.state = ""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(40, 40, 40, 60)
         layout.setSpacing(0)
@@ -47,7 +50,7 @@ class StatePanel(QWidget):
         self._body = QLabel("")
         self._body.setFont(styles.sans(10))
         self._body.setWordWrap(True)
-        self._body.setMaximumWidth(420)
+        self._body.setFixedWidth(self.BODY_WIDTH)
         self._body.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self._body.setStyleSheet(f"color: {styles.rgba(styles.TEXT_MUTED)};")
         layout.addWidget(self._body, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -64,22 +67,36 @@ class StatePanel(QWidget):
 
     def show_state(
         self,
+        state: str,
         kicker: str,
         headline: str,
         body: str,
         action: Optional[str] = None,
     ) -> None:
+        """``state`` names the panel so callers can act on it, not guess."""
+        self.state = state
         self._kicker.setText(kicker)
         self._headline.setText(headline)
         self._body.setText(body)
         self._body.setVisible(bool(body))
+        # A layout will not consult heightForWidth for an aligned widget, so
+        # the wrapped height has to be applied by hand or the text is clipped.
+        self._body.setMinimumHeight(
+            self._body.heightForWidth(self.BODY_WIDTH) if body else 0
+        )
         self._button.setText(action or "")
         self._button.setVisible(bool(action))
 
     # --------------------------------------------------------- named states
 
+    SCANNING = "scanning"
+    EMPTY = "empty"
+    NO_MATCHES = "no_matches"
+    ERROR = "error"
+
     def show_scanning(self) -> None:
         self.show_state(
+            self.SCANNING,
             "Working",
             "Scanning local ports…",
             "Reading the local TCP table and resolving the processes behind it.",
@@ -87,6 +104,7 @@ class StatePanel(QWidget):
 
     def show_empty(self) -> None:
         self.show_state(
+            self.EMPTY,
             "Nothing listening",
             "No listening ports",
             "No active listening services were detected on this machine.",
@@ -95,6 +113,7 @@ class StatePanel(QWidget):
 
     def show_no_matches(self, query: str) -> None:
         self.show_state(
+            self.NO_MATCHES,
             "No matches",
             "Nothing matches your search",
             f'No listening port matches "{query}".',
@@ -103,6 +122,7 @@ class StatePanel(QWidget):
 
     def show_error(self, message: str) -> None:
         self.show_state(
+            self.ERROR,
             "Error",
             "Unable to inspect local ports",
             message or "Some processes may require elevated permissions.",

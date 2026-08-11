@@ -45,6 +45,7 @@ class ConfigManager:
         self._path = Path(path) if path else config_path()
         self._data: Dict[str, Any] = json.loads(json.dumps(DEFAULT_CONFIG))
         self.load_error: Optional[str] = None
+        self.quarantine_path: Optional[Path] = None
         self.load()
 
     @property
@@ -56,7 +57,9 @@ class ConfigManager:
     def load(self) -> None:
         self.load_error = None
         try:
-            raw = self._path.read_text(encoding="utf-8")
+            # utf-8-sig, not utf-8: Notepad and PowerShell both write a BOM,
+            # and a config the user edited by hand must still load.
+            raw = self._path.read_text(encoding="utf-8-sig")
         except FileNotFoundError:
             return
         except OSError as exc:
@@ -66,14 +69,33 @@ class ConfigManager:
         try:
             parsed = json.loads(raw)
         except (ValueError, TypeError) as exc:
-            self.load_error = f"Config file is not valid JSON: {exc}"
+            self._quarantine(f"is not valid JSON: {exc}")
             return
 
         if not isinstance(parsed, dict):
-            self.load_error = "Config file must contain a JSON object."
+            self._quarantine("must contain a JSON object")
             return
 
         self._data = self._sanitise(parsed)
+
+    def _quarantine(self, problem: str) -> None:
+        """Move an unreadable config aside instead of overwriting it.
+
+        The app saves on exit, so without this a single typo in a hand-edited
+        file would silently destroy every custom port name in it.
+        """
+        self.load_error = f"Config file {problem}."
+        try:
+            backup = self._path.with_name(self._path.stem + ".invalid.json")
+            os.replace(self._path, backup)
+        except OSError:
+            self.quarantine_path = None
+            return
+        self.quarantine_path = backup
+        self.load_error = (
+            f"Your config file {problem}. "
+            f"It was kept as {backup.name} and ZeroPort started with defaults."
+        )
 
     def _sanitise(self, parsed: Mapping[str, Any]) -> Dict[str, Any]:
         data = json.loads(json.dumps(DEFAULT_CONFIG))

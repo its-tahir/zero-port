@@ -81,6 +81,12 @@ def is_protected_process(info: ProcessInfo) -> Tuple[bool, str]:
     if info.pid <= 4:
         return True, "Windows kernel process."
 
+    # With neither a name nor a start time there is no way to confirm, at the
+    # moment of termination, that the PID still means the same process. Offer
+    # no stop action rather than one that will always be refused.
+    if not info.name and info.create_time is None:
+        return True, "This process cannot be inspected, so it cannot be stopped safely."
+
     name = (info.name or "").strip().lower()
     if name in CRITICAL_PROCESS_NAMES:
         return True, "Core Windows process."

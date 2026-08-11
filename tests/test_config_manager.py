@@ -33,6 +33,40 @@ def test_a_non_object_file_is_rejected(tmp_path):
     assert config.refresh_interval == 5
 
 
+def test_a_corrupt_file_is_kept_not_overwritten(tmp_path):
+    """A typo in a hand-edited config must not destroy the custom names.
+
+    The app saves on exit, so without quarantining the bad file the next
+    close would write defaults straight over the user's data.
+    """
+    original = '{"custom_descriptions": {"8000": "AI Backend",}}'
+    config = make(tmp_path, original)
+
+    assert config.load_error
+    assert config.quarantine_path is not None
+    assert config.quarantine_path.exists()
+    assert config.quarantine_path.read_text(encoding="utf-8") == original
+    assert "AI Backend" in config.quarantine_path.read_text(encoding="utf-8")
+
+    # Saving afterwards writes a fresh file and leaves the rescued one alone.
+    config.set_custom_descriptions({"3000": "Frontend"})
+    assert config.quarantine_path.read_text(encoding="utf-8") == original
+    assert ConfigManager(tmp_path / "config.json").custom_descriptions == {
+        "3000": "Frontend"
+    }
+
+
+def test_a_file_saved_with_a_bom_still_loads(tmp_path):
+    """Notepad and PowerShell both write UTF-8 with a BOM."""
+    path = tmp_path / "config.json"
+    path.write_bytes(
+        b"\xef\xbb\xbf" + json.dumps({"custom_descriptions": {"8000": "AI Backend"}}).encode()
+    )
+    config = ConfigManager(path)
+    assert config.load_error is None
+    assert config.custom_descriptions == {"8000": "AI Backend"}
+
+
 def test_valid_settings_are_read(tmp_path):
     config = make(
         tmp_path,

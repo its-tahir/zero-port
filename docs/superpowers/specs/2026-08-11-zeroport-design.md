@@ -44,10 +44,21 @@ runs on that worker so the UI never blocks on `wait()`.
 
 ### Data model
 
-`PortEntry` is one listening endpoint: port, protocol (TCP/TCP6), address, PID,
-`ProcessInfo`, description, status, `protected`, `can_stop`, and
-`sibling_ports` (other ports the same PID owns). One process owning three ports
-produces three rows sharing a PID; the PID cell carries a marker and tooltip.
+`PortEntry` is one port held by one process: port, protocol, address,
+`ProcessInfo`, description, status, `protected`, `can_stop`, `sibling_ports`
+(other ports the same PID owns) and `bindings` (the raw sockets behind it).
+
+Rows are grouped by `(port, owning PID)`. A service bound to both the IPv4 and
+IPv6 wildcard is two sockets but one answer to "what is using this port?", and
+rendering it twice produced visually identical rows — a real scan of a
+development machine returned 28 rows of which 10 were indistinguishable
+duplicates. Merged, the same scan returns 18 distinct rows. The individual
+sockets are preserved in `bindings` and listed in the details dialog and the
+address tooltip, so nothing is hidden. Two different processes on the same port
+stay separate, because the PID differs.
+
+One process owning three ports still produces three rows sharing a PID; the PID
+cell carries a violet marker and a tooltip naming every port.
 
 ### Identity fingerprint
 
@@ -110,7 +121,21 @@ Single 1100×700 window (min 850×500), remembered between launches.
 Base `#0A0A0B`, text `#FAFAFA`, accent `#C6F24E`, rare secondary `#A855F7`.
 Background carries a ~3% white dot grid plus a faint procedural grain, painted
 once into a cached tile. Uppercase monospace micro-labels with wide tracking.
-No gradients, glow, glass, or animation beyond a 1px indeterminate scan line.
+No gradients, glow, glass, or animation.
+
+The violet secondary has exactly one job: marking a PID that holds more than
+one port, in the table and in the stop confirmation.
+
+A scan takes about 70 ms, so the indeterminate scan line is revealed only after
+250 ms. Showing it immediately would flash a lime line across the window on
+every auto-refresh — motion with no information in it.
+
+### Testing the states
+
+`tests/test_end_to_end.py` drives the real window: it starts a listener, waits
+for the scan to show it, clicks the STOP cell through Qt's event system,
+accepts the confirmation dialog, and asserts the port is released and the row
+disappears on its own.
 
 ## Testing
 

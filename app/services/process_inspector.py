@@ -148,6 +148,12 @@ class ProcessInspector:
 
         current = self.inspect_process(proc)
 
+        # No identity signal at all means we cannot prove this is the same
+        # process, only that *a* process holds the PID. Refuse rather than
+        # degrade into "does this PID exist?".
+        if expected.create_time is None and not expected.name:
+            return False, current
+
         if expected.create_time is not None and current.create_time is not None:
             if abs(expected.create_time - current.create_time) > 0.001:
                 return False, current

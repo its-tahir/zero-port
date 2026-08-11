@@ -453,7 +453,7 @@ class PortTableView(QTableView):
         self.setWordWrap(False)
         self.setSortingEnabled(True)
         self.setObjectName("portTable")
-        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPixel)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover, True)
 
         # Let the window's texture show through instead of a flat panel colour.

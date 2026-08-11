@@ -19,6 +19,7 @@ from app.models.port_info import PortEntry, ProcessInfo  # noqa: E402
 from app.ui import styles  # noqa: E402
 from app.ui.dialogs import ConfirmStopDialog, ProcessDetailsDialog  # noqa: E402
 from app.ui.main_window import MainWindow  # noqa: E402
+from app.ui.panels import StatePanel  # noqa: E402
 from app.ui.port_table import (  # noqa: E402
     COL_ACTION,
     COL_DESCRIPTION,
@@ -62,6 +63,12 @@ def window(qapp, tmp_path):
     config = ConfigManager(tmp_path / "config.json")
     config.set_refresh(False)
     win = MainWindow(config)
+
+    # Keep the window off the real machine: tests feed results in directly, so
+    # a background scan must never overwrite them mid-test.
+    win.request_scan.disconnect()
+    win.request_stop.disconnect()
+
     yield win
     win.close()
 
@@ -166,12 +173,94 @@ def test_scan_failure_shows_the_error_state(window):
     assert window.count_label.text() == "—"
 
 
+def test_a_failed_scan_never_leaves_stale_rows_behind(window):
+    """Showing the last good scan as if it were current is worse than nothing."""
+    window._on_scan_finished([entry(port=8000), entry(port=3000, pid=18320)])
+    window.search.setText("python")
+
+    window._on_scan_failed("Windows denied access to the connection table.")
+    assert window.stack.currentWidget() is window.state_panel
+
+    # Typing must not swap the stale table back in.
+    window.search.setText("py")
+    assert window.stack.currentWidget() is window.state_panel
+    assert window.table.visible_count() == 0
+
+    # ...and it comes back cleanly once a scan succeeds.
+    window._on_scan_finished([entry(port=8000)])
+    assert window.stack.currentWidget() is window.table
+
+
+def test_the_state_button_retries_after_an_error_rather_than_clearing_search(window):
+    window._on_scan_finished([entry(port=8000)])
+    window.search.setText("python")
+    window._on_scan_failed("boom")
+
+    window._scan_in_flight = False
+    window._on_state_action()
+
+    assert window._scan_in_flight, "RETRY did not start a new scan"
+    assert window.search.text() == "python", "RETRY should not clear the search"
+
+
+def test_the_state_button_clears_the_search_when_nothing_matched(window):
+    window._on_scan_finished([entry(port=8000)])
+    window.search.setText("zzzznope")
+    assert window.state_panel.state == StatePanel.NO_MATCHES
+
+    window._on_state_action()
+    assert window.search.text() == ""
+
+
+def test_a_row_that_cannot_be_stopped_explains_which_reason_applies(window):
+    protected = entry(pid=4, name="System", protected=True)
+    assert window._refusal(protected)[0] == "Protected process"
+
+    ownerless = PortEntry(
+        port=445,
+        protocol="TCP",
+        address="ALL",
+        process=ProcessInfo.unknown(None),
+        description="Windows file sharing (SMB)",
+        protected=True,
+    )
+    assert window._refusal(ownerless)[0] == "No process to stop"
+
+
 def test_overlapping_scans_are_coalesced(window):
     window._scan_in_flight = False
     window.refresh()
     assert window._scan_in_flight
     window.refresh()
     assert window._rescan_queued
+
+
+def test_a_fast_scan_never_flashes_the_progress_bar(window):
+    """A scan takes ~70ms; a lime line every 5 seconds would be noise."""
+    window._scan_in_flight = False
+    window.refresh()
+    assert not window.scan_bar.isVisible()
+    assert window.scan_bar_timer.isActive()
+
+    window._on_scan_finished([entry()])
+    assert not window.scan_bar.isVisible()
+    assert not window.scan_bar_timer.isActive()
+
+
+def test_state_messages_wrap_instead_of_clipping(window):
+    window._on_scan_failed(
+        "Windows denied access to the connection table. "
+        "Some processes may require elevated permissions."
+    )
+    QApplication.processEvents()
+
+    body = window.state_panel._body
+    assert body.width() == window.state_panel.BODY_WIDTH
+    one_line = body.fontMetrics().height()
+    # Two sentences at this width need more than one line, and the label must
+    # actually be tall enough to show them.
+    assert body.heightForWidth(body.width()) > one_line * 1.5
+    assert body.minimumHeight() >= body.heightForWidth(body.width())
 
 
 # ------------------------------------------------------------------ dialogs
@@ -233,14 +322,24 @@ def test_the_stop_button_stays_inside_its_cell(qapp):
 # --------------------------------------------------------------- stop button
 
 
-def _click_action_cell(window, row: int):
+def _click_stop_on_port(window, port: int):
     from PySide6.QtCore import Qt as _Qt
     from PySide6.QtTest import QTest
+
+    # The window's own handler opens a modal dialog, which would block a
+    # headless run. These tests only care that the click is delivered.
+    window.table.stop_requested.disconnect(window.confirm_stop)
 
     window.show()
     QApplication.processEvents()
 
-    index = window.table.proxy.index(row, COL_ACTION)
+    for row in range(window.table.proxy.rowCount()):
+        index = window.table.proxy.index(row, COL_ACTION)
+        if index.data(ENTRY_ROLE).port == port:
+            break
+    else:
+        raise AssertionError(f"port {port} is not in the table")
+
     point = PortItemDelegate.button_rect(window.table.visualRect(index)).center()
     QTest.mouseClick(window.table.viewport(), _Qt.MouseButton.LeftButton, pos=point)
     QApplication.processEvents()
@@ -252,18 +351,19 @@ def test_clicking_stop_raises_a_request_for_that_row(window):
 
     seen = []
     window.table.stop_requested.connect(seen.append)
-    _click_action_cell(window, 1)
+    _click_stop_on_port(window, 3000)
 
     assert seen, "clicking STOP produced no request"
     assert seen[0].port == 3000
+    assert seen[0].pid == 18320
 
 
 def test_clicking_a_protected_row_produces_no_request(window):
-    window._on_scan_finished([entry(pid=4, name="System", protected=True)])
+    window._on_scan_finished([entry(port=445, pid=4, name="System", protected=True)])
 
     seen = []
     window.table.stop_requested.connect(seen.append)
-    _click_action_cell(window, 0)
+    _click_stop_on_port(window, 445)
 
     assert not seen
 
