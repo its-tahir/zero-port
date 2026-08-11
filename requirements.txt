@@ -1,0 +1,5 @@
+# Only the Qt essentials — ZeroPort uses QtCore, QtGui and QtWidgets.
+# The full PySide6 meta-package would add ~140 MB of modules this app never
+# imports, and PyInstaller would carry them into the executable.
+PySide6-Essentials==6.9.1
+psutil==7.0.0
