@@ -1,0 +1,103 @@
+name: Release
+
+# Tag a commit and the executable builds itself and attaches to the release:
+#
+#     git tag v1.0.0
+#     git push origin v1.0.0
+#
+# Building in CI rather than uploading a local file means the published binary
+# is always reproducible from the tagged source.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Generate icon
+        run: python tools/make_icon.py
+
+      - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Build ZeroPort.exe
+        run: python -m PyInstaller ZeroPort.spec --noconfirm --clean
+
+      - name: Verify the executable
+        shell: pwsh
+        run: |
+          $exe = "dist/ZeroPort.exe"
+          if (-not (Test-Path $exe)) { throw "dist/ZeroPort.exe was not produced" }
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $exe))
+          Write-Output "ZeroPort.exe  $size MB  $($info.FileVersion)"
+          "SHA256=$hash" >> $env:GITHUB_ENV
+          "SIZE_MB=$size" >> $env:GITHUB_ENV
+
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF_NAME -like "v*") { $env:GITHUB_REF_NAME } else { "${{ github.event.inputs.tag }}" }
+          @"
+          ## ZeroPort $tag
+
+          A Windows desktop utility that answers "what is using this port?" and
+          lets you release it safely.
+
+          ### Install
+
+          Download **ZeroPort.exe** below and run it. No installer, no Python,
+          no admin rights needed. Right-click it and *Send to -> Desktop* for a
+          shortcut.
+
+          Windows SmartScreen will warn you the first time, because the binary
+          is not code-signed. Choose **More info -> Run anyway**, or verify the
+          checksum below first.
+
+          ### Verify the download
+
+          ``````powershell
+          Get-FileHash ZeroPort.exe -Algorithm SHA256
+          ``````
+
+          Expected: ``$env:SHA256``
+
+          Size: $env:SIZE_MB MB. Built from this tag by GitHub Actions.
+          "@ | Set-Content release-notes.md -Encoding utf8
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF_NAME -like "v*") { $env:GITHUB_REF_NAME } else { "${{ github.event.inputs.tag }}" }
+          gh release create $tag dist/ZeroPort.exe `
+            --title "ZeroPort $tag" `
+            --notes-file release-notes.md

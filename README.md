@@ -12,6 +12,23 @@ network analyser, and it will not grow into one.
 
 ---
 
+## Download
+
+Grab **ZeroPort.exe** from the [latest release](https://github.com/its-tahir/zero-port/releases/latest)
+and run it. No installer, no Python, no administrator rights.
+
+Windows SmartScreen shows a warning the first time, because the binary is not
+code-signed — choose **More info → Run anyway**. If you would rather check
+first, every release lists the executable's SHA-256:
+
+```powershell
+Get-FileHash ZeroPort.exe -Algorithm SHA256
+```
+
+Prefer to build it yourself? See [Building ZeroPort.exe](#building-zeroportexe).
+
+---
+
 ## Features
 
 - **Real listening TCP ports**, read straight from the Windows connection
@@ -112,6 +129,20 @@ To rebuild the icon by itself:
 ```bat
 python tools\make_icon.py
 ```
+
+### Publishing a release
+
+Tagging a commit builds the executable in GitHub Actions and attaches it to a
+release, so the published binary is always reproducible from tagged source:
+
+```bat
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow is [.github/workflows/release.yml](.github/workflows/release.yml).
+It installs dependencies, generates the icon, runs the full test suite, builds,
+and publishes only if all of that passes.
 
 ---
 
